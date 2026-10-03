@@ -109,7 +109,7 @@ test('value diffs describe added, replaced and removed settings for both formats
 
 test('TOML upgrades preserve comments, quoted keys, multiline values and unrelated providers', () => {
   const before = '# keep\r\n"model" = "old # inside" # model comment\r\nmodel_max_output_tokens = 65536\r\nmodel_reasoning_effort = """\r\nmax\r\n"""\r\n[model_providers."callstack_ai"] # provider comment\r\nbase_url = "https://old.example/v1" # URL comment\r\ncustom = "keep"\r\n[model_providers.other]\r\nname = "Other"\r\n';
-  const desired = { model: MODEL, model_reasoning_effort: 'medium', model_auto_compact_token_limit: 220000,
+  const desired = { model: MODEL, model_reasoning_effort: 'medium',
     model_providers: { callstack_ai: { base_url: 'https://api.callstack.ai/v1', wire_api: 'responses' } } };
   const after = updateToml(before, desired, 'test', ['model_max_output_tokens']);
   const value = parseToml(after);
@@ -181,7 +181,8 @@ test('an AI SDK project gets the connector snippet, and nothing is written into 
   const result = spawnSync(process.execPath, [BIN, 'init', '--assistants', 'ai-sdk', '--apply'], { env, cwd: project, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, at(/^ {2}apiKey: process\.env\.CALLSTACK_AUTH_TOKEN,$/));
-  assert.match(result.stdout, /modelContextWindowTokens: 262144/);
+  assert.doesNotMatch(result.stdout, /modelContextWindowTokens|220000|262144/);
+  assert.match(result.stdout, /maxOutputTokens: 32768/);
   assert.deepEqual(await readdir(project), ['package.json']);
 });
 
@@ -212,16 +213,18 @@ test('all automatic adapters configure and repeat without changing files', async
   assert.equal(codex.model_providers.callstack_ai.wire_api, 'responses');
   assert.equal(codex.model_context_window, 262144);
   assert.equal(codex.model_reasoning_effort, 'medium');
-  assert.equal(codex.model_auto_compact_token_limit, 220000);
+  assert.equal(codex.model_auto_compact_token_limit, undefined);
   // Codex has no output-token setting; `codex --strict-config` rejects the field outright.
   assert.ok(!('model_max_output_tokens' in codex));
   const opencode = parseJson(await readFile(join(paths.opencode, 'opencode.json'), 'utf8'));
   const apex = opencode.provider['callstack.ai'].models[MODEL];
   assert.equal(apex.tool_call, true);
+  assert.deepEqual(apex.limit, { context: 262144, output: 32768 });
   assert.deepEqual(Object.keys(apex.variants), ['none', 'low', 'medium', 'xhigh']);
   const pi = parseJson(await readFile(join(paths.pi, 'models.json'), 'utf8'));
   assert.equal(pi.providers.callstack.apiKey, '$CALLSTACK_AUTH_TOKEN');
   assert.equal(pi.providers.callstack.models[0].maxTokens, 32768);
+  assert.equal(pi.providers.callstack.models[0].contextWindow, 262144);
 });
 
 test('CLI previews, applies and undoes an outdated Codex profile without changing base config', async context => {
@@ -229,7 +232,7 @@ test('CLI previews, applies and undoes an outdated Codex profile without changin
   const base = '# default stays\nmodel = "other"\n[model_providers.callstack_ai]\nwire_api = "chat"\n';
   await mkdir(env.CODEX_HOME, { recursive: true });
   await writeFile(join(env.CODEX_HOME, 'config.toml'), base);
-  const old = '# old Apex profile\nmodel = "callstack/Apex"\nmodel_provider = "callstack_ai"\nmodel_context_window = 1000000\nmodel_max_output_tokens = 65536\nmodel_reasoning_effort = "max"\n[features]\ncustom = true\n';
+  const old = '# old Apex profile\nmodel = "callstack/Apex"\nmodel_provider = "callstack_ai"\nmodel_context_window = 1000000\nmodel_auto_compact_token_limit = 220000\nmodel_max_output_tokens = 65536\nmodel_reasoning_effort = "max"\n[features]\ncustom = true\n';
   const path = await writeConfig(env, 'codex', old);
   const preview = cli(['init', '--assistants', 'codex', '--no-interactive', '--json'], env);
   assert.equal(preview.status, 0, preview.stderr);
@@ -238,7 +241,7 @@ test('CLI previews, applies and undoes an outdated Codex profile without changin
   assert.equal(applied.status, 0, applied.stderr);
   const value = parseToml(await readFile(path, 'utf8'));
   assert.equal(value.model_context_window, 262144);
-  assert.equal(value.model_auto_compact_token_limit, 220000);
+  assert.equal(value.model_auto_compact_token_limit, undefined);
   assert.equal(value.model_reasoning_effort, 'medium');
   assert.equal(value.model_max_output_tokens, undefined);
   assert.equal(value.model_providers.callstack_ai.wire_api, 'responses');
@@ -258,7 +261,7 @@ test('outdated OpenCode and Pi budgets and efforts upgrade while preserving cust
     const root = v2 ? 'providers' : 'provider';
     const settings = v2 ? 'settings' : 'options';
     const old = { theme: 'dark', [root]: { 'callstack.ai': { custom: true, [settings]: { apiKey: 'stored', custom: 1 }, models: {
-      other: { name: 'Other' }, [MODEL]: { custom: 2, limit: { context: 1000000, output: 65536 },
+      other: { name: 'Other' }, [MODEL]: { custom: 2, limit: { context: 262144, input: 220000, output: 65536 },
         [settings]: { reasoningEffort: 'minimal', custom: 3 }, variants: v2 ? [{ id: 'max' }] : { max: { reasoningEffort: 'max' } } },
     } } } };
     await writeConfig(env, 'opencode', JSON.stringify(old));
@@ -272,8 +275,7 @@ test('outdated OpenCode and Pi budgets and efforts upgrade while preserving cust
     assert.equal(provider.models[MODEL][settings].custom, 3);
     assert.equal(provider.models[MODEL][settings].reasoningEffort, 'medium');
     assert.equal(provider.models[MODEL].limit.output, 32768);
-    assert.equal(provider.models[MODEL].limit.input, 220000);
-    assert.ok(provider.models[MODEL].limit.input + provider.models[MODEL].limit.output < provider.models[MODEL].limit.context);
+    assert.deepEqual(provider.models[MODEL].limit, { context: 262144, output: 32768 });
     assert.deepEqual(v2 ? provider.models[MODEL].variants.map(v => v.id) : Object.keys(provider.models[MODEL].variants), ['none', 'low', 'medium', 'xhigh']);
     await writeChange(change);
     const [repeat] = await planAssistant({ id: 'opencode', directory });
@@ -281,17 +283,50 @@ test('outdated OpenCode and Pi budgets and efforts upgrade while preserving cust
   }
   const directory = locations(home, env).pi;
   await writeConfig(env, 'pi', JSON.stringify({ providers: { callstack: { apiKey: 'stored', models: [
-    { id: MODEL, maxTokens: 131072, custom: true, compat: { supportsStore: false, reasoningEffortMap: { minimal: 'minimal' } } },
+    { id: MODEL, contextWindow: 262144, maxTokens: 131072, custom: true, compat: { supportsStore: false, reasoningEffortMap: { minimal: 'minimal' } } },
   ] } } }));
   const [change] = await planAssistant({ id: 'pi', directory });
   const provider = parseJson(change.after).providers.callstack;
   assert.equal(provider.apiKey, 'stored');
   assert.equal(provider.models[0].maxTokens, 32768);
   assert.equal(provider.models[0].custom, true);
+  assert.equal(provider.models[0].contextWindow, 262144);
   assert.deepEqual(provider.models[0].compat, { supportsStore: false });
   assert.equal(provider.models[0].thinkingLevelMap.minimal, null);
   assert.equal(provider.models[0].thinkingLevelMap.max, null);
   assert.equal(provider.models[0].thinkingLevelMap.off, 'none');
+});
+
+test('CLI upgrades context metadata to official model limits with preview, repeat and undo', async context => {
+  const { env } = await fixture(context);
+  const originals = {
+    opencode: JSON.stringify({ provider: { 'callstack.ai': { models: {
+      [MODEL]: { limit: { output: 32768 } },
+      other: { limit: { context: 1000000 } },
+    } } } }),
+    pi: JSON.stringify({ providers: { callstack: { models: [
+      { id: MODEL, maxTokens: 32768 },
+      { id: 'other', contextWindow: 1000000 },
+    ] } } }),
+  };
+  for (const [id, text] of Object.entries(originals)) await writeConfig(env, id, text);
+  const args = ['init', '--assistants', 'opencode,pi'];
+  assert.equal(cli([...args, '--no-interactive'], env).status, 0);
+  for (const [id, text] of Object.entries(originals)) assert.equal(await readFile(configPath(env, id), 'utf8'), text);
+  assert.equal(cli([...args, '--apply'], env).status, 0);
+  const upgraded = {};
+  for (const id of Object.keys(originals)) upgraded[id] = await readFile(configPath(env, id), 'utf8');
+  const opencode = parseJson(upgraded.opencode).provider['callstack.ai'].models;
+  assert.deepEqual(opencode[MODEL].limit, { context: 262144, output: 32768 });
+  assert.equal(opencode.other.limit.context, 1000000);
+  const pi = parseJson(upgraded.pi).providers.callstack.models;
+  assert.equal(pi[0].contextWindow, 262144);
+  assert.equal(pi[0].maxTokens, 32768);
+  assert.equal(pi[1].contextWindow, 1000000);
+  assert.equal(cli([...args, '--apply'], env).status, 0);
+  for (const [id, text] of Object.entries(upgraded)) assert.equal(await readFile(configPath(env, id), 'utf8'), text);
+  assert.equal(cli(['undo', '--apply'], env).status, 0);
+  for (const [id, text] of Object.entries(originals)) assert.equal(await readFile(configPath(env, id), 'utf8'), text);
 });
 
 test('Pi keeps other providers and models', async context => {
@@ -413,8 +448,14 @@ test('launch config scopes Claude credentials without mutating parent environmen
   assert.equal(env.ANTHROPIC_API_KEY, 'old');
   assert.equal(launched.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS, '32768');
   assert.equal(launched.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, '262144');
-  assert.equal(launched.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '220000');
-  assert.equal(launched.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE, '100');
+  assert.equal(env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, '1000000');
+  assert.equal(launched.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, env.CLAUDE_CODE_AUTO_COMPACT_WINDOW);
+  assert.equal(launched.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE, env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE);
+  const fresh = launchOptions('claude', { CALLSTACK_AUTH_TOKEN: 'secret' }).env;
+  assert.equal(fresh.CLAUDE_CODE_MAX_CONTEXT_TOKENS, '262144');
+  for (const key of ['CLAUDE_CODE_AUTO_COMPACT_WINDOW', 'CLAUDE_AUTOCOMPACT_PCT_OVERRIDE']) {
+    assert.equal(fresh[key], undefined);
+  }
   assert.equal(env.CLAUDE_CODE_MAX_OUTPUT_TOKENS, '131072');
   assert.deepEqual(launchOptions('codex', env).args, ['--profile', 'callstack_ai']);
   assert.deepEqual(launchOptions('opencode', env).args, ['--model', 'callstack.ai/callstack/Apex']);
@@ -690,6 +731,9 @@ test('manual steps come after the diff, and their snippets never lose their shap
   const plan = result.stdout.indexOf('Planned changes:');
   const manual = result.stdout.indexOf('Manual setup for');
   assert.ok(plan >= 0 && manual > plan, result.stdout);
+  assert.match(result.stdout, /"contextWindow": 262144/);
+  assert.match(result.stdout, /"maxOutputTokens": 32768/);
+  assert.doesNotMatch(result.stdout, /"maxInputTokens"/);
   // The model object is one key per line, so it survives a narrow terminal as valid JSON.
   for (const key of ['"id"', '"url"', '"toolCalling"', '"vision"']) {
     assert.match(result.stdout, new RegExp(`^ +${key}: `, 'm'), result.stdout);

@@ -1,6 +1,6 @@
 {
   "name": "@callstack/apex",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Detects the AI coding assistants installed on your machine and configures them to use Callstack Apex.",
   "license": "MIT",
   "keywords": [
