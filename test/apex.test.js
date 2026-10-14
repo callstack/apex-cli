@@ -909,6 +909,11 @@ console.log(JSON.stringify({ args: process.argv.slice(2), inline: process.env.OP
   const v2 = run('opencode v2.0.29', { OPENCODE_CONFIG_CONTENT: '{"theme":"dark"}' });
   assert.deepEqual(v2.args, ['--standalone', '--x']);
   assert.deepEqual(run('2.0.29', {}, ['run', 'hi']).args, ['run', '--standalone', 'hi'], 'v2 flags follow the subcommand');
+  assert.deepEqual(run('2.0.29', {}, [home]).args, ['--standalone', home], 'a directory starts the interface');
+  assert.deepEqual(run('2.0.29', {}, ['mini']).args, ['mini', '--standalone']);
+  assert.deepEqual(run('Update available: 2.1.0\n1.18.34').args, ['--model', `callstack.ai/${MODEL}`, '--x'],
+    'a notice naming another version is not the version');
+  assert.deepEqual(run('2.0.29', {}, ['auth', 'list']).args, ['auth', 'list'], 'subcommands without --standalone pass through');
   assert.deepEqual(JSON.parse(v2.inline), { theme: 'dark', model: `callstack.ai/${MODEL}` });
   assert.deepEqual(run('unreadable').args, ['--model', `callstack.ai/${MODEL}`, '--x'], 'unknown versions keep the v1 launch');
   const broken = cli(['run', 'opencode'], { ...env, PATH: bin, FAKE_OPENCODE_VERSION: '2.0.0', OPENCODE_CONFIG_CONTENT: '{' });

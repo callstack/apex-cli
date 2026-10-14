@@ -97,12 +97,13 @@ export async function executable(command, env = process.env, platform = process.
   return null;
 }
 
-// OpenCode 1 prints `1.18.34`, OpenCode 2 prints `opencode v2.0.29`. Anything unreadable is
-// treated as 1, the launch Apex CLI has always used.
+// OpenCode 1 prints `1.18.34`, OpenCode 2 prints `opencode v2.0.29`, each on a line of its own,
+// so a notice naming another version is not mistaken for it. Anything unreadable is treated as 1,
+// the launch Apex CLI has always used.
 export function openCodeMajor(binary) {
   return new Promise(resolve => {
     execFile(binary, ['--version'], { timeout: 10000 }, (error, stdout) => {
-      const match = !error && /(\d+)\.\d+\.\d+/.exec(stdout);
+      const match = !error && /^(?:opencode )?v?(\d+)\.\d+\.\d+\s*$/m.exec(stdout);
       resolve(match ? Number(match[1]) : 1);
     });
   });
@@ -277,16 +278,24 @@ export async function planAssistant(assistant, provider = PROVIDERS.vercel) {
   return changes;
 }
 
+// The key a launch needs, so a missing one can be reported before anything else is checked.
+export function launchToken(env, provider) {
+  const token = env[provider.envVar];
+  if (!token?.trim()) throw new Error(`Set ${provider.envVar} in your environment before launching with ${provider.name}.`);
+  return token;
+}
+
 export function launchOptions(id, env = process.env, provider = defaultProvider(env), { openCode = 1 } = {}) {
-  const { model, envVar } = provider;
-  const token = env[envVar];
-  if (!token?.trim()) throw new Error(`Set ${envVar} in your environment before launching with ${provider.name}.`);
+  const { model } = provider;
+  const token = launchToken(env, provider);
   const childEnv = { ...env };
   switch (id) {
     case 'opencode': {
       const selected = `${provider.opencode}/${model}`;
       // OpenCode 2 only takes flags after its subcommand: `opencode run --standalone`.
-      if (openCode >= 2) return { args: ['--standalone'], env: openCode2Env(childEnv, selected), afterCommand: true };
+      if (openCode >= 2) {
+        return { args: ['--standalone'], env: openCode2Env(childEnv, selected), afterCommand: true, note: '(OPENCODE_CONFIG_CONTENT model set)' };
+      }
       return { args: ['--model', selected], env: childEnv };
     }
     case 'codex': return { args: ['--profile', provider.codex], env: childEnv };
@@ -301,18 +310,15 @@ export function launchOptions(id, env = process.env, provider = defaultProvider(
         CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(CONTEXT_WINDOW),
         CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(MAX_OUTPUT),
       });
-      return { args: ['--model', model], env: childEnv };
+      return { args: ['--model', model], env: childEnv, note: '(ANTHROPIC_* gateway environment set)' };
     default: throw new Error(`Cannot launch ${id}. Use the editor's model selector.`);
   }
 }
 
 // What `apex run <id>` actually types for you, so the summary can show the command it replaces.
-// The placeholder token is never shown: only the argument list is part of the expansion.
-const RUN_NOTE = { claude: '(ANTHROPIC_* gateway environment set)' };
-
+// The placeholder token is never shown: only the argument list and the launch's note are.
 export function runExpansion(id, provider, versions = {}) {
-  const { args } = launchOptions(id, { [provider.envVar]: 'placeholder' }, provider, versions);
-  const note = id === 'opencode' && versions.openCode >= 2 ? '(OPENCODE_CONFIG_CONTENT model set)' : RUN_NOTE[id];
+  const { args, note } = launchOptions(id, { [provider.envVar]: 'placeholder' }, provider, versions);
   return [`${id} ${args.join(' ')}`, note].filter(Boolean).join('  ');
 }
 

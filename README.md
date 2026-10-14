@@ -236,7 +236,8 @@ user arguments, and never run `init`. `apex run claude` sets the gateway URL, to
 flag and model aliases in the child process only, leaving your default Claude provider alone.
 `apex run opencode` checks which OpenCode is installed: OpenCode 1 gets `--model`; OpenCode 2,
 whose terminal interface has no `--model`, starts with `--standalone` and the model in
-`OPENCODE_CONFIG_CONTENT`, so the private server sees both the model and your key.
+`OPENCODE_CONFIG_CONTENT`, so the private server sees the model and, for a config that references
+the key variable, your key too.
 
 ## Safety and recovery
 

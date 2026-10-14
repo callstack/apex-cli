@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { parseArgs, styleText } from 'node:util';
 import { spawn } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { IDS, MANUAL_IDS, NAMES, PROVIDERS, PROVIDER_IDS, RUNNABLE, defaultProvider, detect, executable, launchOptions, manualSteps, openCodeMajor, planAssistant, runExpansion } from './assistants.js';
+import { IDS, MANUAL_IDS, NAMES, PROVIDERS, PROVIDER_IDS, RUNNABLE, defaultProvider, detect, executable, launchOptions, launchToken, manualSteps, openCodeMajor, planAssistant, runExpansion } from './assistants.js';
 import { removeChange, writeChange } from './config.js';
 import { MODE_NOTE, describeFile, resolveMode, runWrites } from './plan.js';
 import { appendEntry, batchIds, journalPath, markUndone, newEntry, planUndo, readJournal } from './journal.js';
@@ -197,6 +197,7 @@ async function planAll(assistants, options, provider) {
       name: NAMES[assistant.id],
       detected: assistant.detected,
       evidence: assistant.evidence || null,
+      binary: assistant.binary ?? null,
       manual: MANUAL_IDS.includes(assistant.id),
       error: null,
       files: [],
@@ -378,7 +379,7 @@ async function commandInit(rest) {
     ui.dim('Apex CLI never reads, stores or logs the key itself.'),
   ]);
   const runnable = active.map(entry => entry.id).filter(id => RUNNABLE.includes(id));
-  const versions = await launchVersions(runnable.includes('opencode') ? await executable('opencode') : null);
+  const versions = await launchVersions(runnable.includes('opencode') ? active.find(entry => entry.id === 'opencode').binary : null);
   const rows = runnable.map(id => ({ command: `${apex} run ${id}`, expansion: runExpansion(id, provider, versions) }));
   const commandWidth = ui.columnWidth(rows.map(row => row.command));
   ui.section(runnable.length
@@ -543,6 +544,18 @@ async function launchVersions(openCodeBinary) {
   return openCodeBinary ? { openCode: await openCodeMajor(openCodeBinary) } : {};
 }
 
+const isDirectory = path => stat(path).then(info => info.isDirectory(), () => false);
+
+// OpenCode 2 flags belong to the command they follow. The interface (bare, flags first or a
+// directory), `run` and `mini` take --standalone; other subcommands such as `auth list` reject it.
+async function launchArgs(options, args) {
+  if (!options.afterCommand) return [...options.args, ...args];
+  const [first] = args;
+  if (first === 'run' || first === 'mini') return [first, ...options.args, ...args.slice(1)];
+  if (first === undefined || first.startsWith('-') || await isDirectory(first)) return [...options.args, ...args];
+  return args;
+}
+
 async function commandRun(rest) {
   const before = takeProvider(rest);
   const [id, ...after] = before.rest;
@@ -553,7 +566,7 @@ async function commandRun(rest) {
   const passed = behind.rest;
   const provider = chosen === null ? defaultProvider() : PROVIDERS[chosen];
   // A missing key is reported before a missing binary.
-  launchOptions(id, process.env, provider);
+  launchToken(process.env, provider);
   const binary = await executable(id);
   if (!binary) throw new Error(`${id} was not found on PATH. Install it first, then run ${APEX} init.`);
   if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(binary)) {
@@ -561,9 +574,7 @@ async function commandRun(rest) {
   }
   const options = launchOptions(id, process.env, provider, await launchVersions(id === 'opencode' ? binary : null));
   const args = passed[0] === '--' ? passed.slice(1) : passed;
-  const leading = options.afterCommand && args[0] && !args[0].startsWith('-') ? 1 : 0;
-  const argv = [...args.slice(0, leading), ...options.args, ...args.slice(leading)];
-  const child = spawn(binary, argv, { env: options.env, stdio: 'inherit', shell: false });
+  const child = spawn(binary, await launchArgs(options, args), { env: options.env, stdio: 'inherit', shell: false });
   await new Promise((resolve, reject) => {
     child.once('error', reject);
     child.once('exit', (code, signal) => { process.exitCode = code ?? (signal === 'SIGINT' ? 130 : 1); resolve(); });
