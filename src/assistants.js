@@ -101,26 +101,13 @@ export async function executable(command, env = process.env, platform = process.
 // so a notice naming another version is not mistaken for it. Anything unreadable is treated as 1,
 // the launch Apex CLI has always used.
 export function openCodeMajor(binary) {
+  if (!binary) return Promise.resolve(1);
   return new Promise(resolve => {
     execFile(binary, ['--version'], { timeout: 10000 }, (error, stdout) => {
       const match = !error && /^(?:opencode )?v?(\d+)\.\d+\.\d+\s*$/m.exec(stdout);
       resolve(match ? Number(match[1]) : 1);
     });
   });
-}
-
-// OpenCode 2's TUI has no --model, and its shared background service never sees this
-// environment. A private server (--standalone) does: it reads the model from inline config and
-// the gateway key the config references.
-function openCode2Env(env, model) {
-  let inline = {};
-  if (env.OPENCODE_CONFIG_CONTENT?.trim()) {
-    try { inline = JSON.parse(env.OPENCODE_CONFIG_CONTENT); } catch { inline = null; }
-    if (!inline || typeof inline !== 'object' || Array.isArray(inline)) {
-      throw new Error('OPENCODE_CONFIG_CONTENT is not a JSON object, so Apex CLI cannot add the model to it.');
-    }
-  }
-  return { ...env, OPENCODE_CONFIG_CONTENT: JSON.stringify({ ...inline, model }) };
 }
 
 export function locations(home = homedir(), env = process.env, platform = process.platform) {
@@ -292,11 +279,13 @@ export function launchOptions(id, env = process.env, provider = defaultProvider(
   switch (id) {
     case 'opencode': {
       const selected = `${provider.opencode}/${model}`;
-      // OpenCode 2 only takes flags after its subcommand: `opencode run --standalone`.
-      if (openCode >= 2) {
-        return { args: ['--standalone'], env: openCode2Env(childEnv, selected), afterCommand: true, note: '(OPENCODE_CONFIG_CONTENT model set)' };
-      }
-      return { args: ['--model', selected], env: childEnv };
+      if (openCode < 2) return { args: ['--model', selected], env: childEnv };
+      // OpenCode 2's interface has no --model, and its shared background service never sees this
+      // environment. A private server (--standalone) does: it reads the model from inline config,
+      // and the gateway key the config references. Its flags only follow a subcommand.
+      const inline = env.OPENCODE_CONFIG_CONTENT?.trim() ? parseJson(env.OPENCODE_CONFIG_CONTENT, 'OPENCODE_CONFIG_CONTENT') : {};
+      childEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify({ ...inline, model: selected });
+      return { args: ['--standalone'], env: childEnv, afterCommand: true, note: '(OPENCODE_CONFIG_CONTENT model set)' };
     }
     case 'codex': return { args: ['--profile', provider.codex], env: childEnv };
     case 'pi': return { args: ['--provider', provider.pi, '--model', model, '--thinking', 'medium'], env: childEnv };
@@ -317,8 +306,8 @@ export function launchOptions(id, env = process.env, provider = defaultProvider(
 
 // What `apex run <id>` actually types for you, so the summary can show the command it replaces.
 // The placeholder token is never shown: only the argument list and the launch's note are.
-export function runExpansion(id, provider, versions = {}) {
-  const { args, note } = launchOptions(id, { [provider.envVar]: 'placeholder' }, provider, versions);
+export function runExpansion(id, provider, installed = {}) {
+  const { args, note } = launchOptions(id, { [provider.envVar]: 'placeholder' }, provider, installed);
   return [`${id} ${args.join(' ')}`, note].filter(Boolean).join('  ');
 }
 

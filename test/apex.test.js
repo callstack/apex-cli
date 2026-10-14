@@ -906,7 +906,7 @@ console.log(JSON.stringify({ args: process.argv.slice(2), inline: process.env.OP
   assert.deepEqual(run('1.18.34'), { args: ['--model', `callstack.ai/${MODEL}`, '--x'] });
   assert.deepEqual(run('1.18.34', {}, ['run', 'hi']).args, ['--model', `callstack.ai/${MODEL}`, 'run', 'hi']);
   // OpenCode 2's TUI rejects --model; a private server reads the model from inline config.
-  const v2 = run('opencode v2.0.29', { OPENCODE_CONFIG_CONTENT: '{"theme":"dark"}' });
+  const v2 = run('opencode v2.0.29', { OPENCODE_CONFIG_CONTENT: '{ // OpenCode reads JSONC here too\n"theme":"dark", }' });
   assert.deepEqual(v2.args, ['--standalone', '--x']);
   assert.deepEqual(run('2.0.29', {}, ['run', 'hi']).args, ['run', '--standalone', 'hi'], 'v2 flags follow the subcommand');
   assert.deepEqual(run('2.0.29', {}, [home]).args, ['--standalone', home], 'a directory starts the interface');
@@ -918,7 +918,7 @@ console.log(JSON.stringify({ args: process.argv.slice(2), inline: process.env.OP
   assert.deepEqual(run('unreadable').args, ['--model', `callstack.ai/${MODEL}`, '--x'], 'unknown versions keep the v1 launch');
   const broken = cli(['run', 'opencode'], { ...env, PATH: bin, FAKE_OPENCODE_VERSION: '2.0.0', OPENCODE_CONFIG_CONTENT: '{' });
   assert.equal(broken.status, 1);
-  assert.match(broken.stderr, /OPENCODE_CONFIG_CONTENT is not a JSON object/);
+  assert.match(broken.stderr, /Invalid JSON\/JSONC object in OPENCODE_CONFIG_CONTENT/);
 
   assert.equal(runExpansion('opencode', CALLSTACK), `opencode --model callstack.ai/${MODEL}`);
   assert.equal(runExpansion('opencode', CALLSTACK, { openCode: 2 }), 'opencode --standalone  (OPENCODE_CONFIG_CONTENT model set)');

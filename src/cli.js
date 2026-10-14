@@ -379,8 +379,8 @@ async function commandInit(rest) {
     ui.dim('Apex CLI never reads, stores or logs the key itself.'),
   ]);
   const runnable = active.map(entry => entry.id).filter(id => RUNNABLE.includes(id));
-  const versions = await launchVersions(runnable.includes('opencode') ? active.find(entry => entry.id === 'opencode').binary : null);
-  const rows = runnable.map(id => ({ command: `${apex} run ${id}`, expansion: runExpansion(id, provider, versions) }));
+  const installed = { openCode: await openCodeMajor(active.find(entry => entry.id === 'opencode')?.binary) };
+  const rows = runnable.map(id => ({ command: `${apex} run ${id}`, expansion: runExpansion(id, provider, installed) }));
   const commandWidth = ui.columnWidth(rows.map(row => row.command));
   ui.section(runnable.length
     ? `Use these commands to run ${provider.model} with your selected harnesses:`
@@ -539,21 +539,15 @@ function takeProvider(args) {
   return { value: null, rest: args };
 }
 
-// OpenCode 1 and 2 take the model in different ways, so the launch depends on which is installed.
-async function launchVersions(openCodeBinary) {
-  return openCodeBinary ? { openCode: await openCodeMajor(openCodeBinary) } : {};
-}
-
 const isDirectory = path => stat(path).then(info => info.isDirectory(), () => false);
 
 // OpenCode 2 flags belong to the command they follow. The interface (bare, flags first or a
 // directory), `run` and `mini` take --standalone; other subcommands such as `auth list` reject it.
 async function launchArgs(options, args) {
-  if (!options.afterCommand) return [...options.args, ...args];
-  const [first] = args;
-  if (first === 'run' || first === 'mini') return [first, ...options.args, ...args.slice(1)];
-  if (first === undefined || first.startsWith('-') || await isDirectory(first)) return [...options.args, ...args];
-  return args;
+  const [first, ...rest] = args;
+  if (options.afterCommand && ['run', 'mini'].includes(first)) return [first, ...options.args, ...rest];
+  if (options.afterCommand && first && !first.startsWith('-') && !await isDirectory(first)) return args;
+  return [...options.args, ...args];
 }
 
 async function commandRun(rest) {
@@ -572,7 +566,8 @@ async function commandRun(rest) {
   if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(binary)) {
     throw new Error('Windows .cmd/.bat launchers are not executed through a shell. Use WSL or launch the configured assistant directly.');
   }
-  const options = launchOptions(id, process.env, provider, await launchVersions(id === 'opencode' ? binary : null));
+  // OpenCode 1 and 2 take the model in different ways, so the launch depends on which is installed.
+  const options = launchOptions(id, process.env, provider, { openCode: await openCodeMajor(id === 'opencode' && binary) });
   const args = passed[0] === '--' ? passed.slice(1) : passed;
   const child = spawn(binary, await launchArgs(options, args), { env: options.env, stdio: 'inherit', shell: false });
   await new Promise((resolve, reject) => {
