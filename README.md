@@ -234,6 +234,9 @@ Other launchers: `apex run opencode`, `apex run claude`, `apex run pi`, `apex ru
 Launchers pass extra arguments through unchanged (without a shell), can be overridden by explicit
 user arguments, and never run `init`. `apex run claude` sets the gateway URL, token, attribution
 flag and model aliases in the child process only, leaving your default Claude provider alone.
+`apex run opencode` checks which OpenCode is installed: OpenCode 1 gets `--model`; OpenCode 2,
+whose terminal interface has no `--model`, starts with `--standalone` and the model in
+`OPENCODE_CONFIG_CONTENT`, so the private server sees both the model and your key.
 
 ## Safety and recovery
 

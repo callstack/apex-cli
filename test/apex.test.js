@@ -4,7 +4,7 @@ import { chmod, mkdtemp, mkdir, writeFile, readFile, readdir, stat, lstat, symli
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { PROVIDERS, defaultProvider, detect, locations, planAssistant, launchOptions, manualSteps } from '../src/assistants.js';
+import { PROVIDERS, defaultProvider, detect, locations, planAssistant, launchOptions, manualSteps, runExpansion } from '../src/assistants.js';
 import { addToml, updateToml, editJson, parseJson, parseToml, readConfig, sha256, writeChange } from '../src/config.js';
 import { diffValues, unifiedDiff } from '../src/diff.js';
 import { isSecretKey, redactText } from '../src/secrets.js';
@@ -888,6 +888,35 @@ test('CLI run forwards argument boundaries, child environment and exit status', 
   assert.deepEqual(output.args, ['--model', MODEL, 'a space', '$(touch should-not-exist)']);
   assert.equal(output.model, MODEL);
   assert.equal(output.token, env.CALLSTACK_AUTH_TOKEN);
+});
+
+test('CLI run picks the model the way the installed OpenCode accepts it', async context => {
+  const { home, env } = await fixture(context);
+  const bin = join(home, 'bin');
+  await mkdir(bin);
+  await writeFile(join(bin, 'opencode'), `#!${process.execPath}
+if (process.argv[2] === '--version') { console.log(process.env.FAKE_OPENCODE_VERSION); process.exit(0); }
+console.log(JSON.stringify({ args: process.argv.slice(2), inline: process.env.OPENCODE_CONFIG_CONTENT }));
+`, { mode: 0o755 });
+  const run = (version, extra = {}, passed = ['--x']) => {
+    const result = cli(['run', 'opencode', '--', ...passed], { ...env, PATH: bin, FAKE_OPENCODE_VERSION: version, ...extra });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  };
+  assert.deepEqual(run('1.18.34'), { args: ['--model', `callstack.ai/${MODEL}`, '--x'] });
+  assert.deepEqual(run('1.18.34', {}, ['run', 'hi']).args, ['--model', `callstack.ai/${MODEL}`, 'run', 'hi']);
+  // OpenCode 2's TUI rejects --model; a private server reads the model from inline config.
+  const v2 = run('opencode v2.0.29', { OPENCODE_CONFIG_CONTENT: '{"theme":"dark"}' });
+  assert.deepEqual(v2.args, ['--standalone', '--x']);
+  assert.deepEqual(run('2.0.29', {}, ['run', 'hi']).args, ['run', '--standalone', 'hi'], 'v2 flags follow the subcommand');
+  assert.deepEqual(JSON.parse(v2.inline), { theme: 'dark', model: `callstack.ai/${MODEL}` });
+  assert.deepEqual(run('unreadable').args, ['--model', `callstack.ai/${MODEL}`, '--x'], 'unknown versions keep the v1 launch');
+  const broken = cli(['run', 'opencode'], { ...env, PATH: bin, FAKE_OPENCODE_VERSION: '2.0.0', OPENCODE_CONFIG_CONTENT: '{' });
+  assert.equal(broken.status, 1);
+  assert.match(broken.stderr, /OPENCODE_CONFIG_CONTENT is not a JSON object/);
+
+  assert.equal(runExpansion('opencode', CALLSTACK), `opencode --model callstack.ai/${MODEL}`);
+  assert.equal(runExpansion('opencode', CALLSTACK, { openCode: 2 }), 'opencode --standalone  (OPENCODE_CONFIG_CONTENT model set)');
 });
 
 test('closing the pipe early exits quietly instead of crashing', async context => {

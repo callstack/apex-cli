@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { IDS, MANUAL_IDS, NAMES, PROVIDERS, PROVIDER_IDS, RUNNABLE, defaultProvider, detect, executable, launchOptions, manualSteps, planAssistant, runExpansion } from './assistants.js';
+import { IDS, MANUAL_IDS, NAMES, PROVIDERS, PROVIDER_IDS, RUNNABLE, defaultProvider, detect, executable, launchOptions, manualSteps, openCodeMajor, planAssistant, runExpansion } from './assistants.js';
 import { removeChange, writeChange } from './config.js';
 import { MODE_NOTE, describeFile, resolveMode, runWrites } from './plan.js';
 import { appendEntry, batchIds, journalPath, markUndone, newEntry, planUndo, readJournal } from './journal.js';
@@ -378,7 +378,8 @@ async function commandInit(rest) {
     ui.dim('Apex CLI never reads, stores or logs the key itself.'),
   ]);
   const runnable = active.map(entry => entry.id).filter(id => RUNNABLE.includes(id));
-  const rows = runnable.map(id => ({ command: `${apex} run ${id}`, expansion: runExpansion(id, provider) }));
+  const versions = await launchVersions(runnable.includes('opencode') ? await executable('opencode') : null);
+  const rows = runnable.map(id => ({ command: `${apex} run ${id}`, expansion: runExpansion(id, provider, versions) }));
   const commandWidth = ui.columnWidth(rows.map(row => row.command));
   ui.section(runnable.length
     ? `Use these commands to run ${provider.model} with your selected harnesses:`
@@ -537,6 +538,11 @@ function takeProvider(args) {
   return { value: null, rest: args };
 }
 
+// OpenCode 1 and 2 take the model in different ways, so the launch depends on which is installed.
+async function launchVersions(openCodeBinary) {
+  return openCodeBinary ? { openCode: await openCodeMajor(openCodeBinary) } : {};
+}
+
 async function commandRun(rest) {
   const before = takeProvider(rest);
   const [id, ...after] = before.rest;
@@ -545,14 +551,19 @@ async function commandRun(rest) {
   const chosen = before.value ?? behind.value;
   if (chosen !== null && !PROVIDER_IDS.includes(chosen)) throw new Error(`Unknown --provider. Choose from: ${PROVIDER_IDS.join(', ')}`);
   const passed = behind.rest;
-  const options = launchOptions(id, process.env, chosen === null ? defaultProvider() : PROVIDERS[chosen]);
+  const provider = chosen === null ? defaultProvider() : PROVIDERS[chosen];
+  // A missing key is reported before a missing binary.
+  launchOptions(id, process.env, provider);
   const binary = await executable(id);
   if (!binary) throw new Error(`${id} was not found on PATH. Install it first, then run ${APEX} init.`);
   if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(binary)) {
     throw new Error('Windows .cmd/.bat launchers are not executed through a shell. Use WSL or launch the configured assistant directly.');
   }
+  const options = launchOptions(id, process.env, provider, await launchVersions(id === 'opencode' ? binary : null));
   const args = passed[0] === '--' ? passed.slice(1) : passed;
-  const child = spawn(binary, [...options.args, ...args], { env: options.env, stdio: 'inherit', shell: false });
+  const leading = options.afterCommand && args[0] && !args[0].startsWith('-') ? 1 : 0;
+  const argv = [...args.slice(0, leading), ...options.args, ...args.slice(leading)];
+  const child = spawn(binary, argv, { env: options.env, stdio: 'inherit', shell: false });
   await new Promise((resolve, reject) => {
     child.once('error', reject);
     child.once('exit', (code, signal) => { process.exitCode = code ?? (signal === 'SIGINT' ? 130 : 1); resolve(); });
