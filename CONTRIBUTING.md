@@ -34,6 +34,8 @@ touch your assistants' settings. One test asserts the published bundle imports n
 which is the point of bundling: `tsdown` inlines `@clack/prompts`, `jsonc-parser` and `smol-toml`
 into a single `dist/cli.js` and the package ships with no runtime dependencies.
 
+Open pull requests against `main`: releases are cut from it.
+
 ## Code layout
 
 `src/` is deliberately small and each module owns one concept: `assistants.js` detection and the

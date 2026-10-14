@@ -394,6 +394,43 @@ test('upgrading from 0.2 keeps the keys it stored, so nobody is left sending no 
   assert.equal(await piKey(), '$CALLSTACK_AUTH_TOKEN', "0.2's placeholder is not a key");
 });
 
+test('OpenCode keeps a compact layout when Apex settings already match', async context => {
+  const { home, env } = await fixture(context);
+  const directory = locations(home, env).opencode;
+  await mkdir(directory, { recursive: true });
+  const compact = `{
+  "providers": {
+    "callstack.ai": {
+      "name": "callstack.ai",
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": { "baseURL": "https://api.callstack.ai/v1" },
+      "models": {
+        "${MODEL}": {
+          "name": "Apex",
+          "capabilities": { "tools": true, "input": ["text", "image"], "output": ["text"] },
+          "limit": { "context": 262144, "output": 32768 },
+          "settings": { "reasoningEffort": "medium" },
+          "variants": [
+            { "id": "none", "settings": { "reasoningEffort": "none" } },
+            { "id": "low", "settings": { "reasoningEffort": "low" } },
+            { "id": "medium", "settings": { "reasoningEffort": "medium" } },
+            { "id": "xhigh", "settings": { "reasoningEffort": "xhigh" } }
+          ]
+        }
+      }
+    }
+  }
+}
+`;
+  await writeFile(join(directory, 'opencode.json'), compact);
+  const [change] = await planAssistant({ id: 'opencode', directory });
+  assert.equal(change.after, compact);
+  await writeFile(join(directory, 'opencode.json'), compact.replace('"output": 32768', '"input": 220000, "output": 16384'));
+  const [upgrade] = await planAssistant({ id: 'opencode', directory });
+  assert.deepEqual(parseJson(upgrade.after).providers['callstack.ai'].models[MODEL].limit, { context: 262144, output: 32768 });
+  assert.match(upgrade.after, /"variants": \[\n\s+\{ "id": "none"/, 'only the changed value is rewritten');
+});
+
 test('OpenCode JSONC is edited in place, v2 config gets the v2 shape, ambiguous config is refused', async context => {
   const { home, env } = await fixture(context);
   const directory = locations(home, env).opencode;
