@@ -1,6 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import { parse as parseToml } from 'smol-toml';
-import { parseJson } from './config.js';
+import { parseJson, parseToml } from './config.js';
 import { redactText } from './secrets.js';
 
 function readValues(text, format) {

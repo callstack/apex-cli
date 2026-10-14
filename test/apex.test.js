@@ -4,9 +4,8 @@ import { chmod, mkdtemp, mkdir, writeFile, readFile, readdir, stat, lstat, symli
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { parse as parseToml } from 'smol-toml';
 import { detect, locations, planAssistant, launchOptions, MODEL } from '../src/assistants.js';
-import { addToml, updateToml, editJson, parseJson, readConfig, sha256, writeChange } from '../src/config.js';
+import { addToml, updateToml, editJson, parseJson, parseToml, readConfig, sha256, writeChange } from '../src/config.js';
 import { diffValues, unifiedDiff } from '../src/diff.js';
 import { isSecretKey, redactText } from '../src/secrets.js';
 import { journalPath, markUndone } from '../src/journal.js';
@@ -89,10 +88,10 @@ test('TOML appends only what is missing so diffs stay readable', () => {
   const after = addToml(before, desired, 'test');
   assert.deepEqual(diffValues({ before, after, format: 'toml' }),
     [{ op: 'add', key: 'model_providers.callstack_ai.name', value: 'callstack.ai' }]);
-  assert.match(after, /^model_provider = "callstack_ai"\nmodel = "callstack\/Apex"\n\n\[model_providers]/);
+  assert.match(after, /^model_provider = "callstack_ai"\nmodel = "callstack\/Apex"\n\n\[model_providers\.callstack_ai]\nname = "callstack\.ai"\n$/);
   assert.ok(!after.includes('\n\n\n'), after);
   const diff = unifiedDiff('~/.codex/config.toml', before, after);
-  assert.deepEqual(diff.slice(0, 3), ['--- ~/.codex/config.toml', '+++ ~/.codex/config.toml', '@@ -1,2 +1,6 @@']);
+  assert.deepEqual(diff.slice(0, 3), ['--- ~/.codex/config.toml', '+++ ~/.codex/config.toml', '@@ -1,2 +1,5 @@']);
   assert.ok(!diff.slice(3).some(line => line.startsWith('-')), 'existing lines must not be rewritten');
 });
 

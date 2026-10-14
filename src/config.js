@@ -3,7 +3,7 @@ import { dirname, resolve, parse as parsePath, join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { parse, modify, applyEdits } from 'jsonc-parser';
-import { parse as parseToml, stringify } from 'smol-toml';
+import { parse as parseTomlRaw, stringify } from 'smol-toml';
 
 // Linked directories (Stow, dotfiles repos) are followed: writes land inside them and the link
 // survives. A linked file is refused, since renaming over it would replace the link, and so is a
@@ -37,6 +37,13 @@ export async function readConfig(path) {
 function object(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
+
+// smol-toml returns prototype-less tables, which isDeepStrictEqual never matches against the plain
+// objects we compare them with. Rebuilding them as plain objects keeps `__proto__` an own key.
+const plain = value => Array.isArray(value) ? value.map(plain)
+  : value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === null
+    ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, plain(item)])) : value;
+export const parseToml = text => plain(parseTomlRaw(text));
 
 export function parseJson(text, path) {
   const errors = [];
