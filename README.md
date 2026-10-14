@@ -1,9 +1,23 @@
 # Apex CLI
 
-A CLI for configuring coding assistants to use `callstack/Apex`.
+A CLI for configuring coding assistants to use Apex, Callstack's coding model.
 
-`apex init` detects the assistants on your machine, lets you pick which ones to configure,
-shows every change it wants to make, and only then writes. Nothing changes until you say so.
+`apex init` asks which gateway serves Apex, detects the assistants on your machine, lets you pick
+which ones to configure, shows every change it wants to make, and only then writes. Nothing
+changes until you say so.
+
+## Gateways
+
+| Gateway | `--provider` | Model | Key |
+| --- | --- | --- | --- |
+| Vercel AI Gateway | `vercel` | `callstack/apex` | `AI_GATEWAY_API_KEY` |
+| Callstack portal | `callstack` | `callstack/Apex` | `CALLSTACK_AUTH_TOKEN` |
+
+`apex init` asks which one to use. Without `--provider`, the default is the gateway whose key is
+already set in your shell, and Vercel AI Gateway when neither or both are. `apex detect` and
+`apex run` pick the gateway the same way, so `apex run codex` launches whatever you set up last as
+long as only that key is exported. Each gateway gets its own provider entry in every config, so
+switching gateways adds a provider next to the old one instead of rewriting it.
 
 ## Install
 
@@ -29,25 +43,26 @@ undo your configs, so run `apex undo` first if you want them back.
 | `apex init --apply` | Writes the planned changes without asking | Yes |
 | `apex undo` | Reverts the most recent Apex CLI setup, with the same preview and confirmation | Only after you confirm |
 | `apex undo --list` | Shows recorded setups and which are already undone (`--json` prints the journal) | No |
-| `apex run <assistant> [-- <args>]` | Launches the assistant with the gateway, model and credentials in the child environment | No |
+| `apex run [--provider <id>] <assistant> [-- <args>]` | Launches the assistant with the gateway, model and credentials in the child environment | No |
 | `apex completion <zsh\|bash\|fish>` | Prints a shell completion script | No |
 
 Each command accepts only its own flags, and `--help` and the shell completions list exactly those:
 
 | Command | Flags |
 | --- | --- |
-| `init` | `--assistants <ids>`, `--no-interactive`, `--apply`, `--no-diff`, `--json`, `--help` |
-| `detect` | `--json`, `--help` |
+| `init` | `--assistants <ids>`, `--provider <id>`, `--no-interactive`, `--apply`, `--no-diff`, `--json`, `--help` |
+| `detect` | `--provider <id>`, `--json`, `--help` |
+| `run` | `--provider <id>`, right before or after the assistant |
 | `undo` | `--no-interactive`, `--apply`, `--no-diff`, `--json`, `--list`, `--help` |
 
 `apex init --wat` fails fast, and so does a flag in the wrong command
 (`apex detect --no-diff`). Only `--apply` writes, so there is no "preview *and* write" to argue
 about. `--assistants <ids>` is a comma list of `opencode`, `codex`,
-`claude`, `pi`, `cursor`, `copilot`.
+`claude`, `pi`, `cursor`, `copilot`. `--provider <id>` is `vercel` or `callstack`.
 
 Non-interactive callers (`--no-interactive`, `--json`, pipes, CI) never get a prompt and never
 have files changed unless they also pass `--apply`. `--json` prints a machine-readable plan with
-`mode`, `applied`, `appliedPaths`, per-file `changes` and `nextSteps` instead of the human UI. If a
+`mode`, `provider`, `model`, `envVar`, `applied`, `appliedPaths`, per-file `changes` and `nextSteps` instead of the human UI. If a
 write fails halfway through a batch, the payload still reports what already landed plus the `error`,
 and the exit code is 1.
 
@@ -63,15 +78,15 @@ apex completion fish > ~/.config/fish/completions/apex.fish
 
 ```
  ┌────────────────────────────────────────────────────────────────────────────┐
- │ Apex CLI · Configure callstack/Apex for your favorite harness              │
+ │ Apex CLI · Configure Apex for your favorite harness                        │
  │                                                                            │
  │ Nothing is written until you confirm.                                      │
  └────────────────────────────────────────────────────────────────────────────┘
 │
-◆  Set up callstack/Apex for which assistants?  (space toggles, enter confirms)
-│  OpenCode, Codex
+◇  Which gateway should your assistants use for Apex?
+│  Vercel AI Gateway
 │
-◇  Set up callstack/Apex for which assistants?  (space toggles, enter confirms)
+◇  Set up callstack/apex for which assistants?  (space toggles, enter confirms)
 │  OpenCode, Codex
 
 
@@ -86,15 +101,15 @@ apex completion fish > ~/.config/fish/completions/apex.fish
    -  "theme": "dark"
    +  "theme": "dark",
    +  "provider": {
-   +    "callstack.ai": { … }
+   +    "apex-vercel": { … }
    +  }
     }
 
-   Create     ~/.codex/callstack_ai.config.toml
+   Create     ~/.codex/apex_vercel.config.toml
    --- /dev/null
-   +++ ~/.codex/callstack_ai.config.toml
+   +++ ~/.codex/apex_vercel.config.toml
    @@ -0,0 +1,10 @@
-   +model_provider = "callstack_ai"
+   +model_provider = "apex_vercel"
 
    Existing files get a .apex-backup-<id> copy first.        (dimmed)
 │
@@ -104,23 +119,24 @@ apex completion fish > ~/.config/fish/completions/apex.fish
 
    Environment
 
-   ✓ CALLSTACK_AUTH_TOKEN is set in this shell
+   ✓ AI_GATEWAY_API_KEY is set in this shell
    Apex CLI never reads, stores or logs the key itself.
 
 
-   Use these commands to run callstack/Apex with your selected harnesses:
+   Use these commands to run callstack/apex with your selected harnesses:
 
-   apex run opencode  opencode --model callstack.ai/callstack/Apex        (dimmed)
-   apex run codex     codex --profile callstack_ai
+   apex run opencode  opencode --model apex-vercel/callstack/apex         (dimmed)
+   apex run codex     codex --profile apex_vercel
 
-   ...or pick "callstack/Apex" from the UI when setting up manually.
+   ...or pick "callstack/apex" from the UI when setting up manually.
    For more instructions, visit:
    https://app.notion.com/p/callstack/Apex-how-to-use-it-36d5d027c0f880e99d03d1c37a77382f
 
    If you want to undo the changes, run apex undo
 ```
-`Environment` only shows the `export CALLSTACK_AUTH_TOKEN=…` line while the variable is missing; once
-it is set you get a green `✓ CALLSTACK_AUTH_TOKEN is set in this shell` instead. The closing block shows
+`Environment` only shows the `export AI_GATEWAY_API_KEY=…` line (and, for Vercel AI Gateway, where to
+create a key) while the variable is missing; once it is set you get a green
+`✓ AI_GATEWAY_API_KEY is set in this shell` instead. The Callstack portal shows `CALLSTACK_AUTH_TOKEN`. The closing block shows
 what each `apex run` expands to, links the guide (the URL is never folded, so it stays clickable), and
 mentions `apex undo` only when something was actually written.
 
@@ -142,13 +158,15 @@ their own backup first, so an undo is itself reversible. Apex CLI records each b
 
 ## Integrations
 
+Names below are Vercel AI Gateway / Callstack portal.
+
 | Assistant | Configuration | Behavior |
 | --- | --- | --- |
-| OpenCode v1 | `~/.config/opencode/opencode.json` or `.jsonc` | Adds `provider.callstack.ai`, OpenAI-compatible transport, model and environment-key reference; preserves the default model. |
-| Codex 0.134.0+ | `~/.codex/callstack_ai.config.toml` | Adds a self-contained Responses API provider/profile; leaves base config and default model untouched. |
-| Claude Code | `~/.claude/settings.json` | Merges attribution flag only; use `apex run claude` for gateway credentials and model selection. |
-| Pi | `~/.pi/agent/models.json` | Adds `providers.callstack` with Chat Completions, Apex and `$CALLSTACK_AUTH_TOKEN`; preserves other models. Requires a Pi version supporting `$VAR` key interpolation. |
-| Cursor | Guided setup | Prints endpoint, API-key and custom-model steps; does not modify private editor storage. |
+| OpenCode v1 | `~/.config/opencode/opencode.json` or `.jsonc` | Adds `provider.apex-vercel` / `provider.callstack.ai`, OpenAI-compatible transport, model and environment-key reference; preserves the default model. |
+| Codex 0.134.0+ | `~/.codex/apex_vercel.config.toml` / `callstack_ai.config.toml` | Adds a self-contained Responses API provider/profile (Vercel's Codex endpoint `/codex/v1`); leaves base config and default model untouched. |
+| Claude Code | `~/.claude/settings.json` | Merges attribution flag only; use `apex run claude` for gateway credentials and model selection (Vercel's Claude Code endpoint `/claude-code`). |
+| Pi | `~/.pi/agent/models.json` | Adds `providers.apex-vercel` / `providers.callstack` with Chat Completions, Apex and `$AI_GATEWAY_API_KEY` / `$CALLSTACK_AUTH_TOKEN`; preserves other models. Requires a Pi version supporting `$VAR` key interpolation. |
+| Cursor | Guided setup | Prints endpoint (Vercel's Cursor endpoint `/cursor/v1`), API-key and custom-model steps; does not modify private editor storage. |
 | VS Code / Copilot | Guided setup | Detects VS Code, not whether Copilot is installed; prints custom-endpoint steps and model JSON, retaining the editor-generated secret reference. |
 
 Respects `XDG_CONFIG_HOME`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR`,
@@ -162,15 +180,19 @@ avoid shell interpolation; launch the configured assistant directly or use WSL.
 
 ## Authentication
 
-Provide `CALLSTACK_AUTH_TOKEN` through your shell or a secret manager. Apex CLI never prompts for,
-logs, stores or validates the key, and never writes it to a config file; configs only reference it.
-A hidden prompt keeps it out of your shell history:
+Provide `AI_GATEWAY_API_KEY` (Vercel AI Gateway) or `CALLSTACK_AUTH_TOKEN` (Callstack portal)
+through your shell or a secret manager. Create a Vercel key on the AI Gateway page of your Vercel
+dashboard. Apex CLI never prompts for, logs, stores or validates the key, and never writes it to a
+config file; configs only reference it. A hidden prompt keeps it out of your shell history:
 
 ```bash
-read -r -s -p 'Callstack API key: ' CALLSTACK_AUTH_TOKEN; echo
-export CALLSTACK_AUTH_TOKEN
+read -r -s -p 'AI Gateway API key: ' AI_GATEWAY_API_KEY; echo
+export AI_GATEWAY_API_KEY
 apex run codex
 ```
+
+With both keys exported, `apex run` uses Vercel AI Gateway; pass `--provider callstack` for the
+portal: `apex run --provider callstack codex`.
 
 Other launchers: `apex run opencode`, `apex run claude`, `apex run pi`, `apex run codex -- --help`.
 Launchers pass extra arguments through unchanged (without a shell), can be overridden by explicit
@@ -186,7 +208,7 @@ Apex CLI will not break what you already have.
 - It copies a file next to itself before it edits that file, so you can always put the old one back.
 - It keeps your comments, your other settings, and your default model.
 - It never asks for your API key, writes it down, or sends it anywhere. You keep it in
-  `CALLSTACK_AUTH_TOKEN`, and the CLI prints `<redacted>` wherever a secret would show.
+  `AI_GATEWAY_API_KEY` or `CALLSTACK_AUTH_TOKEN`, and the CLI prints `<redacted>` wherever a secret would show.
 - If a config file is broken, set up another way, or a link to somewhere else, Apex CLI stops and
   tells you. It does not overwrite it.
 - `apex undo` gives your old setup back. It only touches files that still match what Apex CLI wrote.
@@ -197,7 +219,7 @@ How that works underneath:
 - All selected configurations are parsed before any write. Malformed files, conflicting Codex
   profile keys and symlinked files or directories are refused, and one bad assistant blocks the
   whole batch instead of half-applying it.
-- JSON/JSONC edits preserve comments and unrelated keys. Existing Callstack endpoint and auth
+- JSON/JSONC edits preserve comments and unrelated keys. Existing Apex endpoint and auth
   fields are replaced with the documented endpoint and environment references; existing auth files
   are left untouched, so a stored credential may still win and needs removal in the assistant's
   own auth UI.
@@ -217,6 +239,8 @@ How that works underneath:
   (separate profile files for 0.134.0+; provider is placed in that profile).
 - OpenCode v1 configuration: `https://dev.opencode.ai/docs/config/`
   (JSONC and `{env:VARIABLE}` support).
+- Vercel AI Gateway for coding agents: `https://vercel.com/docs/ai-gateway/coding-agents`
+  (per-agent endpoints; Apex is listed as `callstack/apex`).
 - Pi custom models: `https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/models.md`
   (`$VARIABLE` key interpolation; bare uppercase names are literals in current docs).
 

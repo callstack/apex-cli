@@ -54,8 +54,8 @@ outside that gutter, so its text lines up too. Blocks are separated by blank lin
 so nothing can slide out of alignment when a terminal wraps a line, and wrapped text stays inside the
 gutter because widths are measured on the text without its colour codes. Columns inside a line are
 sized from their longest value plus a gap, so labels never touch the text beside them. Added lines are
-green, removals red, hunk markers magenta, the `callstack/Apex` model id is always green, and
-environment references such as `{env:CALLSTACK_AUTH_TOKEN}` are highlighted instead of printed as
+green, removals red, hunk markers magenta, the Apex model id (`callstack/apex` or `callstack/Apex`) is always green, and
+environment references such as `{env:AI_GATEWAY_API_KEY}` are highlighted instead of printed as
 secrets. In `--help`, `apex` is green, the command plain and its options dim.
 
 ## Releasing

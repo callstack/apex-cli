@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { BASE_URL, GUIDE_URL, IDS, MANUAL, MANUAL_IDS, MODEL, NAMES, RUNNABLE, detect, executable, launchOptions, planAssistant, runExpansion } from './assistants.js';
+import { GUIDE_URL, IDS, MANUAL_IDS, NAMES, PROVIDERS, PROVIDER_IDS, RUNNABLE, defaultProvider, detect, executable, launchOptions, manualSteps, planAssistant, runExpansion } from './assistants.js';
 import { removeChange, writeChange } from './config.js';
 import { MODE_NOTE, describeFile, resolveMode, runWrites } from './plan.js';
 import { appendEntry, batchIds, journalPath, markUndone, newEntry, planUndo, readJournal } from './journal.js';
@@ -18,6 +18,8 @@ import * as ui from './ui.js';
 const FLAGS = {
   assistants: { type: 'string', usage: '--assistants <ids>', hint: 'assistant ids',
     text: `comma list of: ${IDS.join(', ')} (skips the picker)` },
+  provider: { type: 'string', usage: '--provider <id>', hint: 'gateway serving Apex',
+    text: `${PROVIDER_IDS.join(' or ')}; defaults to the one whose key is set, else vercel (skips the question)` },
   'no-interactive': { type: 'boolean', usage: '--no-interactive', hint: 'never prompt',
     text: 'skip the questions and just print the plan' },
   apply: { type: 'boolean', usage: '--apply', hint: 'write without prompting',
@@ -34,12 +36,12 @@ const FLAGS = {
 
 const COMMANDS = {
   init: { args: '[--assistants <ids>] [options]', summary: 'configure assistants',
-    flags: ['assistants', 'no-interactive', 'apply', 'no-diff', 'json', 'help'] },
-  detect: { args: '[--json]', summary: 'show what Apex CLI can see on this machine',
-    flags: ['json', 'help'] },
+    flags: ['assistants', 'provider', 'no-interactive', 'apply', 'no-diff', 'json', 'help'] },
+  detect: { args: '[--provider <id>] [--json]', summary: 'show what Apex CLI can see on this machine',
+    flags: ['provider', 'json', 'help'] },
   undo: { args: '[--list] [options]', summary: 'reverse the most recent Apex CLI setup',
     flags: ['no-interactive', 'apply', 'no-diff', 'json', 'list', 'help'] },
-  run: { args: `<${RUNNABLE.join('|')}> [-- <args>]`, summary: 'launch an assistant with the gateway set',
+  run: { args: `[--provider <id>] <${RUNNABLE.join('|')}> [-- <args>]`, summary: 'launch an assistant with the gateway set',
     flags: [] },
   completion: { args: '<zsh|bash|fish>', summary: 'print a shell completion script', flags: [] },
   help: { args: '', summary: 'show all commands', flags: [] },
@@ -81,13 +83,15 @@ const exampleRows = [
   ['apex init', 'pick assistants, review, confirm'],
   ['apex init --assistants codex,pi', 'preview two tools (agent and CI friendly)'],
   ['apex init --assistants codex,pi --apply', 'write those two without asking'],
+  ['apex init --provider callstack', 'use the Callstack portal instead of Vercel AI Gateway'],
   ['apex undo', 'preview the reversal'],
   ['apex undo --apply', 'reverse the last setup without asking'],
   ['apex detect --json', 'machine-readable inventory'],
 ];
 // Names in the left column, values on the right: a wall of four variable names is not a column.
 const environmentRows = [
-  ['CALLSTACK_AUTH_TOKEN', 'your callstack.ai key, needed by apex run and by every assistant you configure'],
+  ...Object.values(PROVIDERS).map(provider => [provider.envVar,
+    `${provider.keyName}, needed by apex run and by every assistant you configure for ${provider.name}`]),
   ['Config directories', 'XDG_CONFIG_HOME, CODEX_HOME, CLAUDE_CONFIG_DIR, PI_CODING_AGENT_DIR'],
   ['Undo journal', 'APEX_STATE_DIR, XDG_STATE_HOME (default ~/.local/state/apex)'],
 ];
@@ -145,7 +149,7 @@ function helpText() {
   const width = ui.width();
   const section = (title, rows, color) => [helpHeading(title), ...columnRows(rows, color, width), ''];
   return [
-    ...ui.wrap(`Apex CLI: point your coding assistants at ${MODEL}`, width).map(line => ui.bold(ui.model(line))),
+    ...ui.wrap(`Apex CLI: point your coding assistants at Apex via ${Object.values(PROVIDERS).map(provider => provider.name).join(' or the ')}`, width).map(line => ui.bold(ui.model(line))),
     '',
     ...section('Usage', usageRows.map(([lead, text]) => [lead, '', text]), rowColors(commandLine)),
     ...section('Options', optionRows, optionColors),
@@ -168,9 +172,13 @@ function readFlags(rest, command) {
   const selected = values.assistants === undefined ? null : [...new Set(values.assistants.split(',').map(id => id.trim()))];
   if (selected?.includes('')) throw new Error('--assistants needs at least one id.');
   if (selected?.some(id => !IDS.includes(id))) throw new Error(`Unknown assistant in --assistants. Choose from: ${IDS.join(', ')}`);
+  if (values.provider !== undefined && !PROVIDER_IDS.includes(values.provider)) {
+    throw new Error(`Unknown --provider. Choose from: ${PROVIDER_IDS.join(', ')}`);
+  }
   const json = Boolean(values.json);
   return {
     selected,
+    provider: values.provider === undefined ? null : PROVIDERS[values.provider],
     showDiff: !values['no-diff'],
     json,
     help: Boolean(values.help),
@@ -182,7 +190,7 @@ function readFlags(rest, command) {
   };
 }
 
-async function planAll(assistants, options) {
+async function planAll(assistants, options, provider) {
   return Promise.all(assistants.map(async assistant => {
     const base = {
       id: assistant.id,
@@ -194,7 +202,7 @@ async function planAll(assistants, options) {
       files: [],
     };
     try {
-      base.files = (await planAssistant(assistant)).map(change => describeFile(change, options));
+      base.files = (await planAssistant(assistant, provider)).map(change => describeFile(change, options));
     } catch (error) {
       base.error = error.message;
     }
@@ -202,7 +210,7 @@ async function planAll(assistants, options) {
   }));
 }
 
-const token = () => process.env.CALLSTACK_AUTH_TOKEN?.trim() || undefined;
+const token = provider => process.env[provider.envVar]?.trim() || undefined;
 
 // Journal timestamps are ISO for machines; people just want to recognise the run.
 const stamp = iso => iso.replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC');
@@ -232,6 +240,12 @@ const jsonAssistant = (entry, secret) => ({
   files: entry.files.map(file => jsonFile(file, secret)),
 });
 
+const providerOptions = () => Object.values(PROVIDERS).map(provider => ({
+  value: provider.id,
+  label: provider.name,
+  hint: `${provider.model}, key in ${provider.envVar}${token(provider) ? ' (set)' : ''}`,
+}));
+
 function pickerOptions(entries) {
   return entries.map(entry => {
     const pending = pendingOf(entry).length;
@@ -248,26 +262,31 @@ function pickerOptions(entries) {
 async function commandInit(rest) {
   const flags = readFlags(rest, 'init');
   if (flags.help) { printHelp(); return; }
-  const secret = token();
-  // The machine payload carries values, not diffs, so do not pay for a diff nobody reads.
-  const options = { secret, showDiff: flags.showDiff && !flags.json };
   const journalFile = journalPath();
   // Each write is journaled right after it lands, so an unreadable journal must stop init before
   // the first write rather than leave a file behind that undo cannot reach.
   if (flags.mode !== 'preview') await readJournal(journalFile);
   const batch = randomUUID();
-  const entries = await planAll(await detect(), options);
+  // Machine callers pick with --provider and --assistants and never get a prompt.
+  const asking = !flags.json && flags.mode === 'prompt';
+  let provider = flags.provider ?? defaultProvider();
+  if (!flags.json) ui.intro('Apex CLI · Configure Apex for your favorite harness', MODE_NOTE[flags.mode]);
+  if (asking && !flags.provider) {
+    const picked = await ui.selectProvider(providerOptions(), provider.id);
+    if (picked === false) return;
+    provider = PROVIDERS[picked];
+  }
+  const secret = token(provider);
+  // The machine payload carries values, not diffs, so do not pay for a diff nobody reads.
+  const options = { secret, showDiff: flags.showDiff && !flags.json };
+  const entries = await planAll(await detect(), options, provider);
   let ids = flags.selected ?? entries.filter(entry => entry.detected).map(entry => entry.id);
-  // Machine callers pick with --assistants and never get a prompt.
-  if (!flags.json) {
-    ui.intro('Apex CLI · Configure callstack/Apex for your favorite harness', MODE_NOTE[flags.mode]);
-    if (flags.mode === 'prompt' && !flags.selected) {
-      const defaults = entries.filter(entry => entry.detected && !entry.manual && !entry.error && pendingOf(entry).length)
-        .map(entry => entry.id);
-      const picked = await ui.selectAssistants(pickerOptions(entries), defaults);
-      if (picked === false) return;
-      ids = picked;
-    }
+  if (asking && !flags.selected) {
+    const defaults = entries.filter(entry => entry.detected && !entry.manual && !entry.error && pendingOf(entry).length)
+      .map(entry => entry.id);
+    const picked = await ui.selectAssistants(pickerOptions(entries), defaults, provider.model);
+    if (picked === false) return;
+    ids = picked;
   }
   const chosen = ids.map(id => entries.find(entry => entry.id === id));
   const blocked = chosen.filter(entry => entry.error);
@@ -289,8 +308,9 @@ async function commandInit(rest) {
     console.log(JSON.stringify({
       command: 'init',
       mode: flags.mode,
-      model: MODEL,
-      endpoint: BASE_URL,
+      provider: provider.id,
+      model: provider.model,
+      endpoint: provider.baseUrl,
       applied: applied.length,
       appliedPaths: applied,
       ...(failure ? { error: failure.message } : {}),
@@ -299,7 +319,7 @@ async function commandInit(rest) {
       assistants: chosen.map(entry => jsonAssistant(entry, secret)),
       journal: journalFile,
       undo: `${APEX} undo`,
-      envVar: 'CALLSTACK_AUTH_TOKEN',
+      envVar: provider.envVar,
       nextSteps: active.filter(entry => RUNNABLE.includes(entry.id)).map(entry => `${APEX} run ${entry.id}`),
     }, null, 2));
     if (blocked.length || failure) process.exitCode = 1;
@@ -311,6 +331,7 @@ async function commandInit(rest) {
     return;
   }
   if (flags.mode !== 'prompt') {
+    ui.prose(`${ui.gray('gateway:')} ${provider.name}`);
     ui.prose(`${ui.gray('setup for:')} ${chosen.map(entry => entry.name + (entry.detected ? '' : ' (not detected)')).join(', ')}`);
   }
   if (blocked.length) {
@@ -343,25 +364,26 @@ async function commandInit(rest) {
   // Steps for the assistants Apex CLI will not touch come after the diff, which is the part
   // people are reviewing.
   for (const entry of manual) {
-    ui.section(`Manual setup for ${entry.name}: Apex CLI writes nothing`, MANUAL[entry.id]);
+    ui.section(`Manual setup for ${entry.name}: Apex CLI writes nothing`, manualSteps(entry.id, provider));
   }
   ui.section('Environment', [
-    ...(secret ? [] : ['export CALLSTACK_AUTH_TOKEN=<your callstack.ai key>']),
-    secret ? `${ui.green('\u2713')} CALLSTACK_AUTH_TOKEN is set in this shell`
-      : `${ui.yellow('!')}  CALLSTACK_AUTH_TOKEN is not set here yet`,
+    ...(secret ? [] : [`export ${provider.envVar}=<${provider.keyName.replace(/^your /, '')}>`]),
+    secret ? `${ui.green('\u2713')} ${provider.envVar} is set in this shell`
+      : `${ui.yellow('!')}  ${provider.envVar} is not set here yet`,
+    ...(!secret && provider.keysUrl ? [`Create a key at ${ui.link(provider.keysUrl)}`] : []),
     ui.dim('Apex CLI never reads, stores or logs the key itself.'),
   ]);
   const runnable = active.map(entry => entry.id).filter(id => RUNNABLE.includes(id));
-  const rows = runnable.map(id => ({ command: `${apex} run ${id}`, expansion: runExpansion(id) }));
+  const rows = runnable.map(id => ({ command: `${apex} run ${id}`, expansion: runExpansion(id, provider) }));
   const commandWidth = ui.columnWidth(rows.map(row => row.command));
   ui.section(runnable.length
-    ? `Use these commands to run ${MODEL} with your selected harnesses:`
-    : `Use ${MODEL} with your assistant:`, [
+    ? `Use these commands to run ${provider.model} with your selected harnesses:`
+    : `Use ${provider.model} with your assistant:`, [
     // A long expansion folds under itself instead of back to the gutter, so the command column stays clear.
     ...rows.flatMap(row => ui.wrap(row.expansion, ui.width() - 3 - commandWidth)
       .map((part, index) => `${ui.pad(index ? '' : row.command, commandWidth)}${ui.dim(part)}`)),
     '',
-    `...or pick "${MODEL}" from the UI when setting up manually.`,
+    `...or pick "${provider.model}" from the UI when setting up manually.`,
     `For more instructions, visit: ${ui.link(GUIDE_URL)}`,
     // Only a run that wrote something has anything to take back.
     ...(applied ? ['', `If you want to undo the changes, run ${ui.bold(`${apex} undo`)}`] : []),
@@ -372,13 +394,14 @@ async function commandInit(rest) {
 async function commandDetect(rest) {
   const flags = readFlags(rest, 'detect');
   if (flags.help) { printHelp(); return; }
-  const secret = token();
-  const entries = await planAll(await detect(), { secret, showDiff: false });
+  const provider = flags.provider ?? defaultProvider();
+  const secret = token(provider);
+  const entries = await planAll(await detect(), { secret, showDiff: false }, provider);
   if (flags.json) {
     console.log(JSON.stringify(entries.map(entry => jsonAssistant(entry, secret)), null, 2));
     return;
   }
-  ui.intro('Apex CLI · What this machine has', 'Read only: nothing is created, edited or removed.');
+  ui.intro(`Apex CLI · What this machine has for ${provider.name}`, 'Read only: nothing is created, edited or removed.');
   const rows = entries.map(entry => {
     const pending = pendingOf(entry).length;
     return {
@@ -406,7 +429,8 @@ async function commandDetect(rest) {
 async function commandUndo(rest) {
   const flags = readFlags(rest, 'undo');
   if (flags.help) { printHelp(); return; }
-  const secret = token();
+  // Undo may cross gateways, so it redacts with whichever key this shell holds.
+  const secret = token(defaultProvider());
   const options = { secret, showDiff: flags.showDiff && !flags.json };
   const journalFile = journalPath();
   const entries = await readJournal(journalFile);
@@ -500,10 +524,24 @@ async function commandUndo(rest) {
   if (result.applied) ui.outro('Undone. Configs are back to how they were. Restart any open assistant to reload them.');
 }
 
+// `--provider` belongs to apex only right before or right after the assistant; anything later is
+// the assistant's own argument and passes through untouched.
+function takeProvider(args) {
+  const [first, second] = args;
+  if (first === '--provider') return { value: second ?? '', rest: args.slice(2) };
+  if (first?.startsWith('--provider=')) return { value: first.slice('--provider='.length), rest: args.slice(1) };
+  return { value: null, rest: args };
+}
+
 async function commandRun(rest) {
-  const [id, ...passed] = rest;
+  const before = takeProvider(rest);
+  const [id, ...after] = before.rest;
   if (!RUNNABLE.includes(id)) throw new Error(`apex run needs one of: ${RUNNABLE.join(', ')}. See ${APEX} --help.`);
-  const options = launchOptions(id);
+  const behind = before.value === null ? takeProvider(after) : { value: null, rest: after };
+  const chosen = before.value ?? behind.value;
+  if (chosen !== null && !PROVIDER_IDS.includes(chosen)) throw new Error(`Unknown --provider. Choose from: ${PROVIDER_IDS.join(', ')}`);
+  const passed = behind.rest;
+  const options = launchOptions(id, process.env, chosen === null ? defaultProvider() : PROVIDERS[chosen]);
   const binary = await executable(id);
   if (!binary) throw new Error(`${id} was not found on PATH. Install it first, then run ${APEX} init.`);
   if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(binary)) {
@@ -526,8 +564,9 @@ const completionsFor = command => COMMANDS[command].flags.map(flag => ({
   long: `--${flag}`,
   short: FLAGS[flag].short ? `-${FLAGS[flag].short}` : null,
   hint: FLAGS[flag].hint,
-  // `--assistants` is the one flag whose value the shells can complete from a table.
+  // `--assistants` and `--provider` are the flags whose values the shells can complete from a table.
   ...(command === 'init' && flag === 'assistants' ? { values: IDS } : {}),
+  ...(flag === 'provider' ? { values: PROVIDER_IDS } : {}),
 }));
 const spellings = entry => [entry.long, entry.short].filter(Boolean);
 
@@ -537,12 +576,13 @@ function completionScript(shell) {
   if (shell === 'zsh') {
     return `#compdef apex
 _apex() {
-  local -a commands assistants runnable${taking.length ? ' ' : ''}${words(taking.map(name => `${name}_flags`))}
+  local -a commands assistants providers runnable${taking.length ? ' ' : ''}${words(taking.map(name => `${name}_flags`))}
   commands=(${words([
       ...Object.entries(COMMANDS).map(([name, command]) => `'${name}:${command.summary}'`),
       ...GLOBALS.map(([flag, text]) => `'${flag}:${text}'`),
     ])})
   assistants=(${words(IDS)})
+  providers=(${words(PROVIDER_IDS)})
   runnable=(${words(RUNNABLE)})
 ${taking.map(name => `  ${name}_flags=(${words(completionsFor(name).flatMap(entry =>
     spellings(entry).map(word => `'${word}:${entry.hint}'`)))})`).join('\n')}
@@ -550,6 +590,8 @@ ${taking.map(name => `  ${name}_flags=(${words(completionsFor(name).flatMap(entr
     _describe -t commands 'apex command' commands
   elif [[ "\${words[CURRENT - 1]}" == --assistants ]]; then
     _describe -t assistants 'assistant' assistants
+  elif [[ "\${words[CURRENT - 1]}" == --provider ]]; then
+    _describe -t providers 'gateway' providers
   else
     case "\${words[2]}" in
 ${taking.map(name => `      ${name}) _describe -t flags 'option' ${name}_flags ;;`).join('\n')}
@@ -566,6 +608,7 @@ if [[ "\${funcstack[1]}" == _apex ]]; then _apex "$@"; else compdef _apex apex; 
     return `_apex_completions() {
   local sub="\${COMP_WORDS[1]}" prev="\${COMP_WORDS[COMP_CWORD - 1]}" current="\${COMP_WORDS[COMP_CWORD]}"
   if [[ "$prev" == --assistants ]]; then COMPREPLY=( $(compgen -W "${words(IDS)}" -- "$current") ); return; fi
+  if [[ "$prev" == --provider ]]; then COMPREPLY=( $(compgen -W "${words(PROVIDER_IDS)}" -- "$current") ); return; fi
   if (( COMP_CWORD == 1 )); then
     COMPREPLY=( $(compgen -W "${words([...Object.keys(COMMANDS), ...GLOBALS.map(([flag]) => flag)])}" -- "$current") )
     return
@@ -587,6 +630,7 @@ complete -F _apex_completions apex
     ...GLOBALS.map(([flag, hint]) => `complete -c apex -f -n "__fish_use_subcommand" -l ${flag.slice(2)} -d '${hint}'`),
     ...taking.flatMap(name => completionsFor(name).map(entry => fish(`__fish_seen_subcommand_from ${name}`, entry))),
     ...RUNNABLE.map(id => `complete -c apex -f -n "__fish_seen_subcommand_from run" -a ${id} -d 'assistant'`),
+    fish('__fish_seen_subcommand_from run', { long: '--provider', short: null, hint: FLAGS.provider.hint, values: PROVIDER_IDS }),
     ...SHELLS.map(name => `complete -c apex -f -n "__fish_seen_subcommand_from completion" -a ${name} -d 'shell'`),
   ].join('\n') + '\n';
 }

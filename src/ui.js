@@ -1,6 +1,6 @@
 import { styleText } from 'node:util';
 import * as p from '@clack/prompts';
-import { MODEL } from './assistants.js';
+import { PROVIDERS } from './assistants.js';
 import { formatValue } from './diff.js';
 import { REDACTED, isEnvReference, maskValue } from './secrets.js';
 import { shortPath } from './paths.js';
@@ -82,11 +82,12 @@ export const pad = (text, column) => {
   return value + ' '.repeat(Math.max(1, column - visible(value).length));
 };
 
-// The model id is the one string worth colouring everywhere it appears. Green alone is enough: its
-// reset (39) clears the colour but leaves the caller's bold or dim (22) running. Occurrences inside
+// The model id (one per gateway) is the one string worth colouring everywhere it appears. Green
+// alone is enough: its reset (39) clears the colour but leaves the caller's bold or dim (22) running. Occurrences inside
 // a longer token are left alone, so a URL or a `provider/model` string is never broken mid-string.
-const MODEL_PATTERN = new RegExp(
-  `(?<![\\w/.-])${MODEL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'g');
+const MODELS = [...new Set(Object.values(PROVIDERS).map(provider => provider.model))]
+  .map(id => id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+const MODEL_PATTERN = new RegExp(`(?<![\\w/.-])(?:${MODELS.join('|')})(?![\\w-])`, 'g');
 export const model = text => String(text).replace(MODEL_PATTERN, match => green(match));
 
 const STATUS_COLUMN = columnWidth(Object.values(STATUS).map(status => status.word));
@@ -225,9 +226,15 @@ export const success = message => bullet(green('✔'), message);
 export const warn = message => bullet(yellow('!'), message);
 export const error = message => bullet(red('✖'), message);
 
-export async function selectAssistants(options, initial) {
+export async function selectProvider(options, initial) {
+  const chosen = await p.select({ message: 'Which gateway should your assistants use for Apex?', options, initialValue: initial });
+  if (p.isCancel(chosen)) { p.cancel('Cancelled. Nothing was written.'); return false; }
+  return chosen;
+}
+
+export async function selectAssistants(options, initial, modelId) {
   const chosen = await p.multiselect({
-    message: model(`Set up ${MODEL} for which assistants?  ${dim('(space toggles, enter confirms)')}`),
+    message: model(`Set up ${modelId} for which assistants?  ${dim('(space toggles, enter confirms)')}`),
     options,
     initialValues: initial,
     required: false,
