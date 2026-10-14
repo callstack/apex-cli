@@ -12,6 +12,7 @@ export const PROVIDERS = {
     id: 'vercel', name: 'Vercel AI Gateway', label: 'Vercel AI Gateway',
     model: 'callstack/apex', envVar: 'AI_GATEWAY_API_KEY', keyName: 'your Vercel AI Gateway API key',
     keysUrl: 'https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai-gateway&title=AI+Gateway',
+    guideUrl: 'https://vercel.com/docs/ai-gateway/coding-agents',
     // The coding-agent surface is plain /v1 that tags the traffic; three agents have their own.
     baseUrl: `${VERCEL}/coding-agent/v1`, codexUrl: `${VERCEL}/codex/v1`,
     cursorUrl: `${VERCEL}/cursor/v1`, anthropicUrl: `${VERCEL}/claude-code`,
@@ -21,6 +22,7 @@ export const PROVIDERS = {
     id: 'callstack', name: 'Callstack portal', label: 'callstack.ai',
     model: 'callstack/Apex', envVar: 'CALLSTACK_AUTH_TOKEN', keyName: 'your callstack.ai key',
     keysUrl: null,
+    guideUrl: 'https://app.notion.com/p/callstack/Apex-how-to-use-it-36d5d027c0f880e99d03d1c37a77382f',
     baseUrl: 'https://api.callstack.ai/v1', codexUrl: 'https://api.callstack.ai/v1',
     cursorUrl: 'https://api.callstack.ai/v1', anthropicUrl: 'https://api.callstack.ai',
     opencode: 'callstack.ai', pi: 'callstack', codex: 'callstack_ai',
@@ -33,7 +35,6 @@ export function defaultProvider(env = process.env) {
   const keyed = PROVIDER_IDS.filter(id => env[PROVIDERS[id].envVar]?.trim());
   return PROVIDERS[keyed.length === 1 ? keyed[0] : 'vercel'];
 }
-export const GUIDE_URL = 'https://app.notion.com/p/callstack/Apex-how-to-use-it-36d5d027c0f880e99d03d1c37a77382f';
 export const IDS = ['opencode', 'codex', 'claude', 'pi', 'cursor', 'copilot'];
 export const NAMES = {
   opencode: 'OpenCode', codex: 'Codex', claude: 'Claude Code', pi: 'Pi',

@@ -129,15 +129,15 @@ apex completion fish > ~/.config/fish/completions/apex.fish
    apex run codex     codex --profile apex_vercel
 
    ...or pick "callstack/apex" from the UI when setting up manually.
-   For more instructions, visit:
-   https://app.notion.com/p/callstack/Apex-how-to-use-it-36d5d027c0f880e99d03d1c37a77382f
+   For more instructions, visit: https://vercel.com/docs/ai-gateway/coding-agents
 
    If you want to undo the changes, run apex undo
 ```
 `Environment` only shows the `export AI_GATEWAY_API_KEY=…` line (and, for Vercel AI Gateway, where to
 create a key) while the variable is missing; once it is set you get a green
 `✓ AI_GATEWAY_API_KEY is set in this shell` instead. The Callstack portal shows `CALLSTACK_AUTH_TOKEN`. The closing block shows
-what each `apex run` expands to, links the guide (the URL is never folded, so it stays clickable), and
+what each `apex run` expands to, links the gateway's guide (Vercel's coding-agents docs or the Callstack portal guide; the URL is never
+folded, so it stays clickable), and
 mentions `apex undo` only when something was actually written.
 
 The diff is the change list: it only shows the lines that actually move, paths are shortened to

@@ -376,6 +376,8 @@ test('human output keeps one indentation grid', async context => {
   const unset = cli([...INIT, '--no-interactive', '--no-diff'], { ...env, CALLSTACK_AUTH_TOKEN: '' }).stdout;
   assert.match(unset, at(/^export AI_GATEWAY_API_KEY=<Vercel AI Gateway API key>$/), 'no key means Vercel');
   assert.match(unset, at(/^Create a key at\n {3}https:\/\/vercel\.com\//), 'the key link stays whole');
+  assert.match(unset, / https:\/\/vercel\.com\/docs\/ai-gateway\/coding-agents$/m, 'Vercel links its own guide');
+  assert.ok(!/notion/.test(unset), 'the portal guide is not for Vercel users');
   const portal = cli([...INIT, '--provider', 'callstack', '--no-interactive', '--no-diff'], { ...env, CALLSTACK_AUTH_TOKEN: '' }).stdout;
   assert.match(portal, at(/^export CALLSTACK_AUTH_TOKEN=<callstack\.ai key>$/));
   assert.ok(!at(/^\u2713/).test(unset), unset);

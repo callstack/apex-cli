@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { GUIDE_URL, IDS, MANUAL_IDS, NAMES, PROVIDERS, PROVIDER_IDS, RUNNABLE, defaultProvider, detect, executable, launchOptions, manualSteps, planAssistant, runExpansion } from './assistants.js';
+import { IDS, MANUAL_IDS, NAMES, PROVIDERS, PROVIDER_IDS, RUNNABLE, defaultProvider, detect, executable, launchOptions, manualSteps, planAssistant, runExpansion } from './assistants.js';
 import { removeChange, writeChange } from './config.js';
 import { MODE_NOTE, describeFile, resolveMode, runWrites } from './plan.js';
 import { appendEntry, batchIds, journalPath, markUndone, newEntry, planUndo, readJournal } from './journal.js';
@@ -384,7 +384,7 @@ async function commandInit(rest) {
       .map((part, index) => `${ui.pad(index ? '' : row.command, commandWidth)}${ui.dim(part)}`)),
     '',
     `...or pick "${provider.model}" from the UI when setting up manually.`,
-    `For more instructions, visit: ${ui.link(GUIDE_URL)}`,
+    `For more instructions, visit: ${ui.link(provider.guideUrl)}`,
     // Only a run that wrote something has anything to take back.
     ...(applied ? ['', `If you want to undo the changes, run ${ui.bold(`${apex} undo`)}`] : []),
     ...(apex === 'apex' ? [] : ['', ui.dim('For the short apex command: npm install -g @callstack/apex')]),
