@@ -57,10 +57,12 @@ export function editJson(text, changes, path) {
   for (const [keys, value] of changes) {
     let parent = parseJson(next, path);
     for (const key of keys.slice(0, -1)) {
-      if (!Object.hasOwn(parent, key)) break;
+      if (!Object.hasOwn(parent, key)) { parent = null; break; }
       if (!object(parent[key])) throw new Error(`Expected object at ${keys.join('.')} in ${path}`);
       parent = parent[key];
     }
+    // Writing an equal value again would reformat it; keep the user's layout instead.
+    if (parent && isDeepStrictEqual(parent[keys.at(-1)], value)) continue;
     next = applyEdits(next, modify(next, keys, value, {
       formattingOptions: { insertSpaces: true, tabSize: 2, eol: next.includes('\r\n') ? '\r\n' : '\n' },
     }));

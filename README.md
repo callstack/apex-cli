@@ -198,7 +198,8 @@ window or percentage controls. Pi retains its native compaction settings. The AI
 snippet sets the output budget without inventing a context-window option.
 
 Run `apex init` again after updating the CLI to preview upgrades to an existing Apex setup; pass
-`--apply` to save them. Apex context/output metadata and reasoning mappings are updated in place. Older OpenCode input
+`--apply` to save them. Apex context/output metadata and reasoning mappings are updated in place, and values that
+already match are left as you formatted them. Older OpenCode input
 limits and Codex compaction overrides are removed so each harness uses its own compaction defaults.
 Codex's obsolete `model_max_output_tokens` key from older Apex versions is removed, and its dedicated
 profile becomes self-contained. Unrelated settings, models, credentials and comments are preserved;
