@@ -33,6 +33,10 @@ async function fixture(context) {
   // `npm test` and `npx` set this, and it decides how follow-up commands are spelled.
   delete env.CI;
   delete env.npm_command;
+  // A gateway key in the developer's shell would change the default gateway, and their own
+  // XDG_DATA_HOME would point OpenCode's key store at their real one.
+  for (const provider of Object.values(PROVIDERS)) if (provider !== CALLSTACK) delete env[provider.envVar];
+  delete env.XDG_DATA_HOME;
   return { home, env, journal: join(home, '.apex-state', 'journal.json') };
 }
 
