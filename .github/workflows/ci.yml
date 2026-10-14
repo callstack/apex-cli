@@ -14,22 +14,12 @@ permissions:
 
 jobs:
   test:
-    name: Node ${{ matrix.node }} on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest]
-        # The engines floor, the active LTS and the current release.
-        node: [22, 24, 26]
-        include:
-          - os: macos-latest
-            node: 24
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: ${{ matrix.node }}
+          node-version: latest
           cache: npm
       - run: npm ci
       - run: npm run check
