@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { IDS, MANUAL_IDS, NAMES, PROVIDERS, PROVIDER_IDS, RUNNABLE, defaultProvider, detect, executable, launchOptions, launchToken, manualSteps, openCodeMajor, planAssistant, runExpansion } from './assistants.js';
+import { IDS, MANUAL_IDS, NAMES, PROVIDERS, PROVIDER_IDS, RUNNABLE, defaultProvider, detect, executable, launchOptions, launchToken, manualSteps, openCodeSupportsStandalone, planAssistant, runExpansion } from './assistants.js';
 import { removeChange, writeChange } from './config.js';
 import { MODE_NOTE, describeFile, resolveMode, runWrites } from './plan.js';
 import { appendEntry, batchIds, journalPath, markUndone, newEntry, planUndo, readJournal } from './journal.js';
@@ -379,8 +379,14 @@ async function commandInit(rest) {
     ui.dim('Apex CLI never reads, stores or logs the key itself.'),
   ]);
   const runnable = active.map(entry => entry.id).filter(id => RUNNABLE.includes(id));
-  const installed = { openCode: await openCodeMajor(active.find(entry => entry.id === 'opencode')?.binary) };
-  const rows = runnable.map(id => ({ command: `${apex} run ${id}`, expansion: runExpansion(id, provider, installed) }));
+  // OpenCode not on PATH can't be probed; show the bare command and let `apex run` report it.
+  const opencodeBinary = active.find(entry => entry.id === 'opencode')?.binary;
+  const probed = opencodeBinary ? await openCodeSupportsStandalone(opencodeBinary) : undefined;
+  const installed = { openCodeStandalone: probed };
+  const rows = runnable.map(id => ({
+    command: `${apex} run ${id}`,
+    expansion: id === 'opencode' && probed === undefined ? id : runExpansion(id, provider, installed),
+  }));
   const commandWidth = ui.columnWidth(rows.map(row => row.command));
   ui.section(runnable.length
     ? `Use these commands to run ${provider.model} with your selected harnesses:`
@@ -567,7 +573,10 @@ async function commandRun(rest) {
     throw new Error('Windows .cmd/.bat launchers are not executed through a shell. Use WSL or launch the configured assistant directly.');
   }
   // OpenCode 1 and 2 take the model in different ways, so the launch depends on which is installed.
-  const options = launchOptions(id, process.env, provider, { openCode: await openCodeMajor(id === 'opencode' && binary) });
+  // The warning goes to stderr because the child owns stdout.
+  const standalone = id === 'opencode' ? await openCodeSupportsStandalone(binary) : false;
+  const options = launchOptions(id, process.env, provider, { openCodeStandalone: standalone });
+  if (options.warning) console.error(styleText('yellow', options.warning));
   const args = passed[0] === '--' ? passed.slice(1) : passed;
   const child = spawn(binary, await launchArgs(options, args), { env: options.env, stdio: 'inherit', shell: false });
   await new Promise((resolve, reject) => {
