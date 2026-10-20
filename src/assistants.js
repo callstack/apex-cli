@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { access, readFile, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join, delimiter } from 'node:path';
@@ -97,17 +98,22 @@ export async function executable(command, env = process.env, platform = process.
   return null;
 }
 
-// OpenCode 1 prints `1.18.34`, OpenCode 2 prints `opencode v2.0.29`, each on a line of its own,
-// so a notice naming another version is not mistaken for it. Anything unreadable is treated as 1,
-// the launch Apex CLI has always used.
-export function openCodeMajor(binary) {
-  if (!binary) return Promise.resolve(1);
-  return new Promise(resolve => {
-    execFile(binary, ['--version'], { timeout: 10000 }, (error, stdout) => {
-      const match = !error && /^(?:opencode )?v?(\d+)\.\d+\.\d+\s*$/m.exec(stdout);
-      resolve(match ? Number(match[1]) : 1);
-    });
-  });
+const execFileAsync = promisify(execFile);
+
+// Only OpenCode 2 has --standalone, so its --help tells the generations apart. The version can't:
+// dev and beta builds of both report `0.0.0-*` or `local`. OpenCode 1 prints its help on stderr
+// and OpenCode 2 on stdout, so both are checked. Resolves true (OpenCode 2), false (OpenCode 1)
+// or null when the binary gave no usable answer; it never rejects.
+export async function openCodeSupportsStandalone(binary) {
+  if (!binary) return null;
+  try {
+    const { stdout, stderr } = await execFileAsync(binary, ['--help'], { timeout: 5000 });
+    return `${stdout}${stderr}`.includes('--standalone');
+  } catch (error) {
+    // Covers nonzero exits, timeouts, spawn failures and synchronous throws (e.g. a .cmd on
+    // Windows). Output printed before a failure still counts; without the flag it proves nothing.
+    return `${error.stdout}${error.stderr}`.includes('--standalone') ? true : null;
+  }
 }
 
 export function locations(home = homedir(), env = process.env, platform = process.platform) {
@@ -272,14 +278,26 @@ export function launchToken(env, provider) {
   return token;
 }
 
-export function launchOptions(id, env = process.env, provider = defaultProvider(env), { openCode = 1 } = {}) {
+// `openCodeStandalone` is the result of openCodeSupportsStandalone: true for OpenCode 2, false for
+// OpenCode 1, null when unknown. Unknown adds no model flag, since a wrong one makes OpenCode exit.
+export function launchOptions(id, env = process.env, provider = defaultProvider(env), { openCodeStandalone = false } = {}) {
   const { model } = provider;
   const token = launchToken(env, provider);
   const childEnv = { ...env };
   switch (id) {
     case 'opencode': {
       const selected = `${provider.opencode}/${model}`;
-      if (openCode < 2) return { args: ['--model', selected], env: childEnv };
+      if (openCodeStandalone === null) {
+        // Both generations start without a model flag, on the user's own configured model.
+        return {
+          args: [], env: childEnv,
+          note: '(OpenCode interface unknown: no model flag added)',
+          warning: 'Apex CLI: Could not ask which OpenCode interface is installed, so it launches'
+            + ' without a model flag. OpenCode 1 takes --model, OpenCode 2 takes --standalone;'
+            + ' opencode --help says which you have.',
+        };
+      }
+      if (!openCodeStandalone) return { args: ['--model', selected], env: childEnv };
       // OpenCode 2's interface has no --model, and its shared background service never sees this
       // environment. A private server (--standalone) does: it reads the model from inline config,
       // and the gateway key the config references. Its flags only follow a subcommand.
@@ -308,7 +326,7 @@ export function launchOptions(id, env = process.env, provider = defaultProvider(
 // The placeholder token is never shown: only the argument list and the launch's note are.
 export function runExpansion(id, provider, installed = {}) {
   const { args, note } = launchOptions(id, { [provider.envVar]: 'placeholder' }, provider, installed);
-  return [`${id} ${args.join(' ')}`, note].filter(Boolean).join('  ');
+  return [[id, ...args].join(' '), note].filter(Boolean).join('  ');
 }
 
 // One line per key: the whole object on one line cannot be folded to a terminal, and a step that
